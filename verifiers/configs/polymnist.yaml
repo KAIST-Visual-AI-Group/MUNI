@@ -1,0 +1,52 @@
+name: polymnist_verifier
+
+# One classifier is shared across m0/m1/m2. Flips and sample mixing are
+# disabled because they change the digit or quadrant labels.
+model:
+  backbone: nvidia/mit-b0
+  pretrained: true
+  cls_heads:
+    digit: 10
+    quadrant: 4
+
+data:
+  type: polymnist
+  cache_path: ${DATA_ROOT}/poly_mnist/images_m0-m1-m2_64_u8.pt
+  modalities: [m0, m1, m2]
+  csv_path: ${DATA_ROOT}/poly_mnist/labels.csv
+  key_format: "{:06d}"
+  img_size: 64
+  train_stems: [0, 230000]
+  # The final scorer uses all examples. This overlapping slice is operational
+  # only, never checkpoint selection; deploy final-epoch last.pth.
+  val_stems: [229990, 230000]
+
+augment:
+  scale_range: [0.95, 1.05]
+  translate_frac: 0.08
+  rotation_deg: 2.0
+  brightness: 0.1
+  contrast: 0.1
+  hue: 0.05
+  saturation: 0.1
+  noise_std: 0.01
+  affine_prob: 0.5
+
+train:
+  epochs: 20
+  batch_size: 512
+  lr: 3.0e-4
+  weight_decay: 0.05
+  warmup_epochs: 2
+  label_smoothing: 0.05
+  grad_clip: 1.0
+  ema_decay: 0.999
+  num_workers: 6
+  task_weights:
+    digit: 1.0
+    quadrant: 1.0
+
+log:
+  output_dir: ./verifiers/checkpoints/polymnist
+  log_freq: 20
+  eval_every: 2

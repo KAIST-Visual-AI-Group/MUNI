@@ -1,0 +1,42 @@
+# Install matching torch, torchvision, and torchaudio builds first.
+# See README.md for an example installation.
+
+numpy>=1.24,<3
+
+# Configuration & utilities
+omegaconf>=2.3,<3
+einops>=0.8,<1
+tqdm>=4.67,<5
+timm>=1.0,<2
+
+# Imaging & plotting
+Pillow
+matplotlib>=3.7,<4
+scipy>=1.10,<2
+opencv-python-headless>=4.9,<4.12
+albumentations>=2.0,<3
+PyYAML>=6,<7
+pyarrow>=20
+soundfile>=0.13,<1
+librosa>=0.11,<1
+resampy>=0.4,<1
+
+# Logging
+tensorboard>=2.10,<3
+
+# NLP and local foundation loaders (dtype= requires Transformers 4.56+).
+transformers>=4.56,<6
+accelerate>=1.0,<2
+peft>=0.15,<1
+huggingface_hub>=0.30,<2
+diffusers==0.37.1
+sentence-transformers>=3.4,<6
+open-clip-torch>=2.30,<4
+# Image-text-audio feature-cache construction (OpenAI ViT-L/14 + HTSAT CLAP).
+openai-clip>=1.0.1
+laion-clap==1.1.7
+
+# Paper benchmark metrics and reference-stat preparation.
+pytorch-fid>=0.3,<1
+pycocoevalcap>=1.2,<2
+wav2clip>=0.1,<1

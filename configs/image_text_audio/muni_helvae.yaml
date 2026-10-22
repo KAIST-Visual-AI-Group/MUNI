@@ -1,0 +1,20 @@
+# Image-text-audio MUNI — HELVAE aggregation
+#
+# HELVAE shares the modern PoE training and evaluation contract, but uses
+# Hellinger aggregation and lets non-target experts receive predictive
+# gradients during self-reconstruction.
+
+base: base.yaml
+
+model:
+  routing:
+    train_paths:
+      any_self: {weight: 1.0, stop_grad: target}
+    aggregator:
+      adapter: "muni.modules.aggregation.HellingerAggregator"
+      params:
+        modalities: ${model.routing.modalities}
+        latent_dim: ${model.latent_dim}
+
+checkpoint:
+  output_dir: ./output/image_text_audio/muni_helvae

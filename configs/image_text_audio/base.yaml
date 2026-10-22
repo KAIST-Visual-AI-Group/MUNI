@@ -1,0 +1,528 @@
+# =============================================================================
+# Image-text-audio MUNI — shared training configuration
+#
+# Method leaves select the aggregator and self-reconstruction detach rule.
+# =============================================================================
+
+base: ../base.yaml
+
+paths:
+  data_root: ${required_env:DATA_ROOT}
+  ckpt_root: ${required_env:CKPT_ROOT}
+
+image_text_audio:
+  feat_dim: 768
+  noise_scale: 1.0
+
+  # Standardized float32 feature bytes prepared from supplied metadata/media by
+  # scripts/data_prep/build_image_text_audio_cache.py.
+  cache_root: ${paths.data_root}/image_text_audio
+  laion_feats: ${image_text_audio.cache_root}/train/laion_coco_aesthetic/feats.parquet
+  flickr_feats: ${image_text_audio.cache_root}/train/flickr30k/feats.parquet
+  vggsound_feats: ${image_text_audio.cache_root}/train/vggsound/feats.parquet
+  audiocaps_feats: ${image_text_audio.cache_root}/train/audiocaps/feats.parquet
+
+  laion_captions: ${image_text_audio.cache_root}/train/laion_coco_aesthetic/captions.json
+  flickr_captions: ${image_text_audio.cache_root}/train/flickr30k/captions.json
+  audiocaps_captions: ${image_text_audio.cache_root}/train/audiocaps/captions.json
+
+  image_decoder: stable-unclip-small
+  audio_decoder: audioldm-m-full
+  text_decoder: gemmae
+  decoder_names:
+    image: ${image_text_audio.image_decoder}
+    audio: ${image_text_audio.audio_decoder}
+    text: ${image_text_audio.text_decoder}
+  image_renderer: {}
+
+  checkpoints:
+    root_dir: ${paths.ckpt_root}/flowbind
+    text:
+      gemmae_ckpt: ${image_text_audio.checkpoints.root_dir}/gemmae_3.pt
+      decoder_dir: ${image_text_audio.checkpoints.root_dir}/gemma-3-1b-pt
+    image:
+      decoder_dir: ${image_text_audio.checkpoints.root_dir}/stable-diffusion-2-1-unclip-small
+    audio:
+      decoder_dir: ${image_text_audio.checkpoints.root_dir}/audioldm-m-full
+      bridge_ckpt: ${image_text_audio.checkpoints.root_dir}/lightweight_audio_ae.pth
+
+  latent_seq_len: 1
+  latent_dim: 768
+  gemma_path: ${paths.ckpt_root}/flowbind/gemma-3-1b-pt
+  gemmae_init_ckpt: ${paths.ckpt_root}/flowbind/gemmae_3.pt
+  text_token_max_len: 32
+
+model:
+  latent_seq_len: ${image_text_audio.latent_seq_len}
+  latent_dim: ${image_text_audio.latent_dim}
+  noise_scale: ${image_text_audio.noise_scale}
+
+  modules:
+    text_encoder_net:
+      target: "muni.models.features.encoder.ResidualMLPFlatEncoder"
+      params:
+        feat_dim: ${image_text_audio.feat_dim}
+        latent_dim: ${x2:${model.latent_dim}}
+        hidden_dim: 2048
+        num_blocks: 3
+        dropout: 0.1
+    image_encoder_net:
+      target: "muni.models.features.encoder.ResidualMLPFlatEncoder"
+      params:
+        feat_dim: ${image_text_audio.feat_dim}
+        latent_dim: ${x2:${model.latent_dim}}
+        hidden_dim: 2048
+        num_blocks: 3
+        dropout: 0.1
+    audio_encoder_net:
+      target: "muni.models.features.encoder.ResidualMLPFlatEncoder"
+      params:
+        feat_dim: ${image_text_audio.feat_dim}
+        latent_dim: ${x2:${model.latent_dim}}
+        hidden_dim: 2048
+        num_blocks: 3
+        dropout: 0.1
+
+    prior_net:
+      target: "muni.models.flows.mlp.MLPFlowDenoiser"
+      params:
+        token_dim: ${model.latent_dim}
+        hidden_size: 768
+        depth: 6
+        num_classes: 1
+        label_drop_prob: 0.0
+        context_dim: null
+
+    image_decoder_net:
+      target: "muni.models.flows.mlp.MLPFlowDenoiser"
+      params:
+        token_dim: ${image_text_audio.feat_dim}
+        hidden_size: 768
+        depth: 10
+        num_classes: 1
+        label_drop_prob: 0.0
+        context_dim: ${model.latent_dim}
+        context_memory_slots: ${model.latent_seq_len}
+        context_drop_prob: 0.1
+        dropout: 0.1
+
+    audio_decoder_net:
+      target: "muni.models.features.decoder.MLPFeatureDecoder"
+      params:
+        feat_dim: ${image_text_audio.feat_dim}
+        hidden_size: 768
+        depth: 6
+        context_dim: ${model.latent_dim}
+        context_memory_slots: ${model.latent_seq_len}
+        dropout: 0.1
+
+    text_prefix_projector:
+      target: "muni.models.text.gemmae_projector.GemmaeReuseProjector"
+      params:
+        context_dim: ${model.latent_dim}
+        context_memory_slots: ${model.latent_seq_len}
+        feat_dim: ${image_text_audio.feat_dim}
+        hidden_size: 768
+        depth: 10
+        prefix_len: 3
+        prefix_out_dim: 1152
+        gemmae_proj_ckpt: ${image_text_audio.gemmae_init_ckpt}
+        dropout: 0.1
+        freeze_prefix_proj: false
+
+    gemma_lora_lm:
+      compile: false
+      target: "muni.models.text.gemma_lora.GemmaLoraLM"
+      params:
+        pretrained_path: ${image_text_audio.gemma_path}
+        tokenizer_path: ${image_text_audio.gemma_path}
+        init_from_gemmae_ckpt: ${image_text_audio.gemmae_init_ckpt}
+        lora_r: 16
+        lora_alpha: 32
+        lora_dropout: 0.05
+        lora_target_modules:
+          - q_proj
+          - k_proj
+          - v_proj
+          - o_proj
+          - gate_proj
+          - up_proj
+          - down_proj
+        gradient_checkpointing: false
+        dtype: bfloat16
+        attn_implementation: sdpa
+
+  routing:
+    modalities: [text, image, audio]
+
+    train_paths:
+      any_self: {weight: 1.0}
+      any_cross: {weight: 2.0}
+      almost_prior: {weight: 2.0}
+
+    aggregated_kl_weight: 1.0e-4
+
+    encoders:
+      text:
+        weight: 1.0
+        adapter: "muni.modules.latent.LatentFeatureEncoderAdapter"
+        module: text_encoder_net
+        params: {}
+      image:
+        weight: 1.0
+        adapter: "muni.modules.latent.LatentFeatureEncoderAdapter"
+        module: image_encoder_net
+        params: {}
+      audio:
+        weight: 1.0
+        adapter: "muni.modules.latent.LatentFeatureEncoderAdapter"
+        module: audio_encoder_net
+        params: {}
+
+    decoders:
+      text:
+        weight: 1.0
+        adapter: "muni.modules.gemma_ar.GemmaARTextDecoderAdapter"
+        module: gemma_lora_lm
+        params:
+          projector_module: text_prefix_projector
+          encoder_grad_scale: 1.0
+          max_new_tokens: 64
+          temperature: 0.0
+          top_k: 0
+          top_p: 1.0
+          label_smoothing: 0.0
+          align_weight: 1.0
+          align_loss_type: mse
+          ce_loss_requires_modality: image
+          ce_loss_prob: 1.0
+          ce_loss_batch_ratio: 0.0625
+          ce_loss_weight: 0.05
+      image:
+        weight: 1.0
+        adapter: "muni.modules.flow.FlowDecoderAdapter"
+        module: image_decoder_net
+        params:
+          layout: feature
+          class_label: 0
+          noise_scale: ${model.noise_scale}
+          encoder_grad_scale: 1.0
+          sampler_cfg_scale: 4.0
+          sampler_steps: 25
+          sampler_method: euler
+          pred_type: v
+          timestep_dist: uniform
+      audio:
+        weight: 1.0
+        adapter: "muni.modules.latent.LatentFeatureMMSEDecoderAdapter"
+        module: audio_decoder_net
+        params:
+          encoder_grad_scale: 1.0
+          loss_type: mse
+
+    prior:
+      adapter: "muni.modules.flow.FlowPriorAdapter"
+      module: prior_net
+      weight: 1.0
+      params:
+        class_label: 0
+        seq_len: ${model.latent_seq_len}
+        noise_scale: ${model.noise_scale}
+        encoder_grad_scale: 0.01
+        sampler_steps: 25
+        sampler_method: euler
+        pred_type: v
+        timestep_dist: uniform
+
+# Training-time evaluation uses the same compact feature caches and decoded
+# references as the standalone paper benchmark.
+dataset_eval:
+  flip_prob: 0.0
+  pair_groups:
+    text_image:
+      subdatasets:
+        text:
+          type: latent_feature_parquet
+          params:
+            parquet_paths: ${image_text_audio.cache_root}/eval/coco_val2014/feats.parquet
+            array_key: text
+        image:
+          type: latent_feature_parquet
+          params:
+            parquet_paths: ${image_text_audio.cache_root}/eval/coco_val2014/feats.parquet
+            array_key: image
+    text_audio:
+      subdatasets:
+        text:
+          type: latent_feature_parquet
+          params:
+            parquet_paths: ${image_text_audio.cache_root}/eval/audiocaps_test/feats.parquet
+            array_key: text
+        audio:
+          type: latent_feature_parquet
+          params:
+            parquet_paths: ${image_text_audio.cache_root}/eval/audiocaps_test/feats.parquet
+            array_key: audio
+    image_audio:
+      subdatasets:
+        image:
+          type: latent_feature_parquet
+          params:
+            parquet_paths: ${image_text_audio.cache_root}/eval/vggsound_test/feats.parquet
+            array_key: image
+        audio:
+          type: latent_feature_parquet
+          params:
+            parquet_paths: ${image_text_audio.cache_root}/eval/vggsound_test/feats.parquet
+            array_key: audio
+
+eval_datasets:
+  text-image:
+    feat_dir: ${image_text_audio.cache_root}/eval/coco_val2014/feats.parquet
+    captions_json: ${image_text_audio.cache_root}/eval/coco_val2014/captions.json
+    images_dir: ${image_text_audio.cache_root}/eval/coco_val2014/images.parquet
+  text-audio:
+    feat_dir: ${image_text_audio.cache_root}/eval/audiocaps_test/feats.parquet
+    captions_json: ${image_text_audio.cache_root}/eval/audiocaps_test/captions.json
+    audio_dir: ${image_text_audio.cache_root}/eval/audiocaps_test/audio.parquet
+  image-audio:
+    feat_dir: ${image_text_audio.cache_root}/eval/vggsound_test/feats.parquet
+    images_dir: ${image_text_audio.cache_root}/eval/vggsound_test/images.parquet
+    audio_dir: ${image_text_audio.cache_root}/eval/vggsound_test/audio.parquet
+
+dataset:
+  flip_prob: 0.0
+  pair_groups:
+    text_image:
+      subdatasets:
+        text:
+          type: text_feature_and_tokens_parquet
+          params:
+            parquet_paths: ${image_text_audio.laion_feats}
+            captions_sources:
+              - ${image_text_audio.laion_captions}
+            tokenizer_path: ${image_text_audio.gemma_path}
+            max_seq_len: ${image_text_audio.text_token_max_len}
+        image:
+          type: latent_feature_parquet
+          params:
+            parquet_paths: ${image_text_audio.laion_feats}
+            array_key: image
+
+    image_audio:
+      subdatasets:
+        image:
+          type: latent_feature_parquet
+          params:
+            parquet_paths: ${image_text_audio.vggsound_feats}
+            array_key: image
+        audio:
+          type: latent_feature_parquet
+          params:
+            parquet_paths: ${image_text_audio.vggsound_feats}
+            array_key: audio
+
+    text_audio:
+      subdatasets:
+        text:
+          type: text_feature_and_tokens_parquet
+          params:
+            parquet_paths: ${image_text_audio.audiocaps_feats}
+            captions_sources:
+              - ${image_text_audio.audiocaps_captions}
+            tokenizer_path: ${image_text_audio.gemma_path}
+            max_seq_len: ${image_text_audio.text_token_max_len}
+        audio:
+          type: latent_feature_parquet
+          params:
+            parquet_paths: ${image_text_audio.audiocaps_feats}
+            array_key: audio
+
+    text_image_flickr:
+      subdatasets:
+        text:
+          type: text_feature_only_parquet
+          params:
+            parquet_paths: ${image_text_audio.flickr_feats}
+            array_key: text
+        image:
+          type: latent_feature_parquet
+          params:
+            parquet_paths: ${image_text_audio.flickr_feats}
+            array_key: image
+
+evaluators:
+  generation:
+    text:
+      loggers:
+        - target: "muni.evaluation.loggers.image_text_audio.DecodedTextLogger"
+          params:
+            num_vis_samples: 16
+            decoder_name: ${image_text_audio.text_decoder}
+            checkpoint_paths: ${image_text_audio.checkpoints}
+    image:
+      loggers:
+        - target: "muni.evaluation.loggers.image_text_audio.DecodedImageLogger"
+          params:
+            num_vis_samples: 16
+            decoder_name: ${image_text_audio.image_decoder}
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            renderer_settings: ${image_text_audio.image_renderer}
+    audio:
+      loggers:
+        - target: "muni.evaluation.loggers.image_text_audio.DecodedAudioLogger"
+          params:
+            num_vis_samples: 8
+            decoder_name: ${image_text_audio.audio_decoder}
+            checkpoint_paths: ${image_text_audio.checkpoints}
+
+  reconstruction:
+    text:
+      loggers:
+        - target: "muni.evaluation.loggers.image_text_audio.DecodedTextLogger"
+          params:
+            num_vis_samples: 12
+            decoder_name: ${image_text_audio.text_decoder}
+            checkpoint_paths: ${image_text_audio.checkpoints}
+    image:
+      loggers:
+        - target: "muni.evaluation.loggers.image_text_audio.DecodedImageLogger"
+          params:
+            num_vis_samples: 12
+            decoder_name: ${image_text_audio.image_decoder}
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            renderer_settings: ${image_text_audio.image_renderer}
+
+  translation:
+    - src: text
+      tgt: image
+      metrics:
+        - target: "muni.evaluation.metrics.image_text_audio_decoded.DecodedAlignmentMetric"
+          params:
+            num_samples: 256
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            decoder_names: ${image_text_audio.decoder_names}
+            renderer_settings: ${image_text_audio.image_renderer}
+      loggers:
+        - target: "muni.evaluation.loggers.image_text_audio.DecodedImageLogger"
+          params:
+            num_vis_samples: 12
+            decoder_name: ${image_text_audio.image_decoder}
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            renderer_settings: ${image_text_audio.image_renderer}
+            source_decoder_type: text
+            source_decoder_name: ${image_text_audio.text_decoder}
+    - src: image
+      tgt: text
+      metrics:
+        - target: "muni.evaluation.metrics.image_text_audio_decoded.DecodedAlignmentMetric"
+          params:
+            num_samples: 256
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            decoder_names: ${image_text_audio.decoder_names}
+            renderer_settings: ${image_text_audio.image_renderer}
+      loggers:
+        - target: "muni.evaluation.loggers.image_text_audio.DecodedTextLogger"
+          params:
+            num_vis_samples: 12
+            decoder_name: ${image_text_audio.text_decoder}
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            renderer_settings: ${image_text_audio.image_renderer}
+            source_decoder_type: image
+            source_decoder_name: ${image_text_audio.image_decoder}
+    - src: text
+      tgt: audio
+      metrics:
+        - target: "muni.evaluation.metrics.image_text_audio_decoded.DecodedAlignmentMetric"
+          params:
+            num_samples: 256
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            decoder_names: ${image_text_audio.decoder_names}
+            renderer_settings: ${image_text_audio.image_renderer}
+      loggers:
+        - target: "muni.evaluation.loggers.image_text_audio.DecodedAudioLogger"
+          params:
+            num_vis_samples: 8
+            decoder_name: ${image_text_audio.audio_decoder}
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            source_decoder_type: text
+            source_decoder_name: ${image_text_audio.text_decoder}
+    - src: audio
+      tgt: text
+      metrics:
+        - target: "muni.evaluation.metrics.image_text_audio_decoded.DecodedAlignmentMetric"
+          params:
+            num_samples: 256
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            decoder_names: ${image_text_audio.decoder_names}
+            renderer_settings: ${image_text_audio.image_renderer}
+      loggers:
+        - target: "muni.evaluation.loggers.image_text_audio.DecodedTextLogger"
+          params:
+            num_vis_samples: 12
+            decoder_name: ${image_text_audio.text_decoder}
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            source_decoder_type: audio
+            source_decoder_name: ${image_text_audio.audio_decoder}
+    - src: image
+      tgt: audio
+      metrics:
+        - target: "muni.evaluation.metrics.image_text_audio_decoded.DecodedAlignmentMetric"
+          params:
+            num_samples: 256
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            decoder_names: ${image_text_audio.decoder_names}
+            renderer_settings: ${image_text_audio.image_renderer}
+      loggers:
+        - target: "muni.evaluation.loggers.image_text_audio.DecodedAudioLogger"
+          params:
+            num_vis_samples: 8
+            decoder_name: ${image_text_audio.audio_decoder}
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            renderer_settings: ${image_text_audio.image_renderer}
+            source_decoder_type: image
+            source_decoder_name: ${image_text_audio.image_decoder}
+    - src: audio
+      tgt: image
+      metrics:
+        - target: "muni.evaluation.metrics.image_text_audio_decoded.DecodedAlignmentMetric"
+          params:
+            num_samples: 256
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            decoder_names: ${image_text_audio.decoder_names}
+            renderer_settings: ${image_text_audio.image_renderer}
+      loggers:
+        - target: "muni.evaluation.loggers.image_text_audio.DecodedImageLogger"
+          params:
+            num_vis_samples: 12
+            decoder_name: ${image_text_audio.image_decoder}
+            checkpoint_paths: ${image_text_audio.checkpoints}
+            renderer_settings: ${image_text_audio.image_renderer}
+            source_decoder_type: audio
+            source_decoder_name: ${image_text_audio.audio_decoder}
+
+  information:
+    text:
+      target: "muni.evaluation.information.PriorDenoisingCostEvaluator"
+      params: {num_samples: 2000, num_u_steps: 8}
+    image:
+      target: "muni.evaluation.information.PriorDenoisingCostEvaluator"
+      params: {num_samples: 2000, num_u_steps: 8}
+    audio:
+      target: "muni.evaluation.information.PriorDenoisingCostEvaluator"
+      params: {num_samples: 2000, num_u_steps: 8}
+
+train:
+  epochs: 201
+  batch_size: 1024
+  blr: 1.0e-4
+  compile_backbones: true
+
+eval:
+  eval_freq: 50
+
+checkpoint:
+  output_dir: ./output/image_text_audio
+  save_last_freq: 50
+  log_freq: 100
+  save_ckpt_freq: 50

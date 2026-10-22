@@ -1,0 +1,44 @@
+# =============================================================================
+# Gaussian-mixture benchmark — MMVAE+ baseline
+#
+# Encoder posterior is split into a SHARED head ``q_m(w | x_m)`` (width 48,
+# matching every other baseline's lat=48 budget) and a PRIVATE head
+# ``q_m(z_m | x_m)`` of width 24 (additional per-modality capacity).  KL on
+# the private head targets the standard prior ``N(0, I)``; private latents
+# at both training cross-recon and test cross-gen are drawn from ``N(0, I)``
+# (``ModalityPrivatePrior`` default ``learnable=False``).  Routing is
+# ``one_any`` (single-source MoE with prior target).
+# =============================================================================
+
+base: base.yaml
+
+model:
+  latent_dim: 72                # = shared 48 + private 24 (per modality)
+
+  modules:
+    # Shared-only flow prior; ``token_dim`` is the only field that differs from
+    # base — every other backbone param is inherited.
+    prior_net:
+      params:
+        token_dim: 48
+
+  routing:
+    train_paths:
+      one_any:      { weight: 1.0 }
+
+    aggregator:
+      adapter: "muni.modules.aggregation.MoEAggregator"
+      params:
+        modalities: ${model.routing.modalities}
+        latent_dim: 48                   # shared_dim (attribute only)
+
+    private_priors:
+      kl_weight: 1.0   # β = 1 (standard default; matches CUB / MultiVAE)
+      A: &priv
+        target: "muni.modules.private_prior.ModalityPrivatePrior"
+        params: { dim: 24 }
+      B: *priv
+      C: *priv
+
+checkpoint:
+  output_dir: ./output/gmm/mmvae_plus

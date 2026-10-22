@@ -1,0 +1,17 @@
+# Image-text-audio MUNI — PoE aggregation
+
+base: base.yaml
+
+model:
+  routing:
+    train_paths:
+      any_self: {weight: 1.0, stop_grad: all}
+    aggregator:
+      adapter: "muni.modules.aggregation.PoEAggregator"
+      params:
+        modalities: ${model.routing.modalities}
+        latent_dim: ${model.latent_dim}
+        prior_expert: false
+
+checkpoint:
+  output_dir: ./output/image_text_audio/muni_poe

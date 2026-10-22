@@ -1,0 +1,374 @@
+# PolyMNIST-Quadrant-Labels: m0/m1/m2 (64px RGB), digit (10 classes), quadrant (4 classes).
+# All modalities share digit identity and active quadrant per sample.
+# Endpoint configs inherit this base and supply aggregation/routing differences.
+
+base: ../base.yaml
+
+paths:
+  data_root: ${required_env:DATA_ROOT}
+  verifier_ckpt: ${required_env:CKPT_ROOT}/polymnist64_verifier.pth
+
+model:
+  latent_seq_len: 1
+  latent_dim: 32
+  noise_scale: 1.0
+
+  modules:
+    # Shared image decoder; modality labels select m0/m1/m2.
+    diffusion_net:
+      target: "muni.models.vision.ncsnpp.NCSNpp"
+      params:
+        token_dim: 3
+        num_classes: 3                    # m0 / m1 / m2 class-label
+        label_drop_prob: 0.0
+        grid_size: 64
+        context_dim: ${model.latent_dim}
+
+        nf: 64
+        ch_mult: [1, 2, 2, 2]
+        num_res_blocks: 2
+        attn_resolutions: [16]
+        dropout: 0.05
+
+        attn_skip_scale: 0.7071067811865475
+        num_heads: 1
+
+        fourier_scale: 16.0
+        fir: true
+        fir_kernel: [1, 3, 3, 1]
+        progressive_input: input_skip
+
+        context_seq_len: ${model.latent_seq_len}     # = 1; sized for null-CFG embedding.
+        context_drop_prob: 0.1
+
+    # Unconditional sequence prior.
+    prior_net:
+      target: "muni.models.toy.mlp.ToyFlowMLP"
+      params:
+        token_dim: ${model.latent_dim}
+        hidden_size: 512
+        depth: 4
+        num_classes: 1
+        label_drop_prob: 0.0
+        context_dim: null
+        context_memory_slots: null
+
+    # Image modalities use the shared image_encoder_net below.
+    m0_encoder_net: null
+    m1_encoder_net: null
+    m2_encoder_net: null
+
+    # Label encoders.
+    digit_encoder_net:
+      target: "muni.models.components.mlp.ClassEncoderMLP"
+      params:
+        num_latents: ${model.latent_seq_len}
+        latent_dim: ${x2:${model.latent_dim}}
+        hidden_dim: 256
+        num_classes: 10
+        depth: 2
+    quadrant_encoder_net:
+      target: "muni.models.components.mlp.ClassEncoderMLP"
+      params:
+        num_latents: ${model.latent_seq_len}
+        latent_dim: ${x2:${model.latent_dim}}
+        hidden_dim: 256
+        num_classes: 4
+        depth: 2
+
+    # Label decoders.
+    digit_classifier_net:
+      target: "muni.models.components.mlp.MeanPooledLatentClassifierMLP"
+      params:
+        latent_dim: ${model.latent_dim}
+        hidden_dim: 256
+        num_classes: 10
+        depth: 2
+    quadrant_classifier_net:
+      target: "muni.models.components.mlp.MeanPooledLatentClassifierMLP"
+      params:
+        latent_dim: ${model.latent_dim}
+        hidden_dim: 256
+        num_classes: 4
+        depth: 2
+
+    # Shared image encoder; resamplers compress spatial features to posterior tokens.
+    image_encoder_net:
+      target: "muni.models.vision.resnet.SDStyleResNetEncoder"
+      params:
+        num_modalities: 3
+        c_in: 3
+        c_out: 128                        # = ImageResamplerEncoderAdapter feature_dim
+        ch: 64
+        ch_mult: [1, 2, 4]
+        num_res_blocks: 2
+        pos_channels: 32
+        modality_film: true
+
+  routing:
+    modalities: ["m0", "m1", "m2", "digit", "quadrant"]
+
+    aggregated_kl_weight: 1e-4
+    aggregated_sigreg_weight: 0.0
+    aggregated_sigreg_sketch_dim: null
+    aggregated_sigreg_mean_weight: 0.0
+
+    encoders:
+      m0: &image_encoder_adapter
+        adapter: "muni.modules.image.ImageResamplerEncoderAdapter"
+        module: "image_encoder_net"
+        params:
+          feature_dim: 128                  # = SDStyleResNetEncoder.c_out
+          num_latents: ${model.latent_seq_len}
+          output_dim: ${x2:${model.latent_dim}}
+          hidden_size: 128
+          num_heads: 2
+          depth: 1
+          logvar_init_bias: -2.0
+          modality_idx: 0
+      m1:
+        adapter: "muni.modules.image.ImageResamplerEncoderAdapter"
+        module: "image_encoder_net"
+        params:
+          feature_dim: 128                  # = SDStyleResNetEncoder.c_out
+          num_latents: ${model.latent_seq_len}
+          output_dim: ${x2:${model.latent_dim}}
+          hidden_size: 128
+          num_heads: 2
+          depth: 1
+          logvar_init_bias: -2.0
+          modality_idx: 1
+      m2:
+        adapter: "muni.modules.image.ImageResamplerEncoderAdapter"
+        module: "image_encoder_net"
+        params:
+          feature_dim: 128                  # = SDStyleResNetEncoder.c_out
+          num_latents: ${model.latent_seq_len}
+          output_dim: ${x2:${model.latent_dim}}
+          hidden_size: 128
+          num_heads: 2
+          depth: 1
+          logvar_init_bias: -2.0
+          modality_idx: 2
+      digit:
+        adapter: "muni.modules.classifier.ClassifierEncoderAdapter"
+        module: "digit_encoder_net"
+        params: {}
+      quadrant:
+        adapter: "muni.modules.classifier.ClassifierEncoderAdapter"
+        module: "quadrant_encoder_net"
+        params: {}
+
+    decoders:
+      m0:
+        adapter: "muni.modules.flow.FlowDecoderAdapter"
+        module: "diffusion_net"
+        params: &flow_decoder_params
+          layout: image
+          class_label: 0
+          img_size: 64
+          patch_size: 1
+          in_channels: 3
+          noise_scale: ${model.noise_scale}
+          encoder_grad_scale: 1.0
+          timestep_dist: logit_normal
+          pred_type: v
+          p_mean: -0.8
+          p_std: 1.0
+          sampler_steps: 25
+      m1:
+        adapter: "muni.modules.flow.FlowDecoderAdapter"
+        module: "diffusion_net"
+        params:
+          <<: *flow_decoder_params
+          class_label: 1
+      m2:
+        adapter: "muni.modules.flow.FlowDecoderAdapter"
+        module: "diffusion_net"
+        params:
+          <<: *flow_decoder_params
+          class_label: 2
+      digit:
+        adapter: "muni.modules.classifier.ClassifierDecoderAdapter"
+        module: "digit_classifier_net"
+        params: {}
+      quadrant:
+        adapter: "muni.modules.classifier.ClassifierDecoderAdapter"
+        module: "quadrant_classifier_net"
+        params: {}
+
+    # Sequence prior.
+    prior:
+      adapter: "muni.modules.flow.FlowPriorAdapter"
+      module: "prior_net"
+      params:
+        class_label: 0
+        seq_len: ${model.latent_seq_len}
+        noise_scale: ${model.noise_scale}
+        encoder_grad_scale: 0.01
+        timestep_dist: uniform
+        pred_type: v
+        sampler_steps: 50
+
+
+evaluators:
+  generation:
+    m0:
+      loggers:
+        - target: "muni.evaluation.loggers.common.ImageGridLogger"
+          params: { num_vis_samples: 16 }
+    m1:
+      loggers:
+        - target: "muni.evaluation.loggers.common.ImageGridLogger"
+          params: { num_vis_samples: 16 }
+    m2:
+      loggers:
+        - target: "muni.evaluation.loggers.common.ImageGridLogger"
+          params: { num_vis_samples: 16 }
+
+  reconstruction:
+    m0:
+      metrics: [{ target: "muni.evaluation.metrics.common.ImagePSNR" }]
+      loggers: [{ target: "muni.evaluation.loggers.common.ImageTripletLogger" }]
+    m1:
+      metrics: [{ target: "muni.evaluation.metrics.common.ImagePSNR" }]
+      loggers: [{ target: "muni.evaluation.loggers.common.ImageTripletLogger" }]
+    m2:
+      metrics: [{ target: "muni.evaluation.metrics.common.ImagePSNR" }]
+      loggers: [{ target: "muni.evaluation.loggers.common.ImageTripletLogger" }]
+    digit:
+      metrics: [{ target: "muni.evaluation.metrics.common.CategoricalAccuracy" }]
+    quadrant:
+      metrics: [{ target: "muni.evaluation.metrics.common.CategoricalAccuracy" }]
+
+  information:
+    m0:
+      target: "muni.evaluation.information.PriorDenoisingCostEvaluator"
+      params: { num_samples: 5000, num_u_steps: 8 }
+    m1:
+      target: "muni.evaluation.information.PriorDenoisingCostEvaluator"
+      params: { num_samples: 5000, num_u_steps: 8 }
+    m2:
+      target: "muni.evaluation.information.PriorDenoisingCostEvaluator"
+      params: { num_samples: 5000, num_u_steps: 8 }
+
+  # Per-route digit/quadrant accuracy for label-conditioned image generation.
+  translation:
+    - srcs: ["digit", "quadrant"]
+      tgt: "m0"
+      metrics:
+        - target: "muni.evaluation.metrics.verifiers.VerifierClassificationMetric"
+          params: { ckpt: "${paths.verifier_ckpt}", head: "digit" }
+        - target: "muni.evaluation.metrics.verifiers.VerifierClassificationMetric"
+          params: { ckpt: "${paths.verifier_ckpt}", head: "quadrant" }
+      loggers: [{ target: "muni.evaluation.loggers.common.ImageGridLogger", params: { num_vis_samples: 16 } }]
+    - srcs: ["digit", "quadrant"]
+      tgt: "m1"
+      metrics:
+        - target: "muni.evaluation.metrics.verifiers.VerifierClassificationMetric"
+          params: { ckpt: "${paths.verifier_ckpt}", head: "digit" }
+        - target: "muni.evaluation.metrics.verifiers.VerifierClassificationMetric"
+          params: { ckpt: "${paths.verifier_ckpt}", head: "quadrant" }
+      loggers: [{ target: "muni.evaluation.loggers.common.ImageGridLogger", params: { num_vis_samples: 16 } }]
+    - srcs: ["digit", "quadrant"]
+      tgt: "m2"
+      metrics:
+        - target: "muni.evaluation.metrics.verifiers.VerifierClassificationMetric"
+          params: { ckpt: "${paths.verifier_ckpt}", head: "digit" }
+        - target: "muni.evaluation.metrics.verifiers.VerifierClassificationMetric"
+          params: { ckpt: "${paths.verifier_ckpt}", head: "quadrant" }
+      loggers: [{ target: "muni.evaluation.loggers.common.ImageGridLogger", params: { num_vis_samples: 16 } }]
+
+  # Image-vs-label agreement for joint samples, with per-modality breakdowns.
+  # Empty image heads include all images as sources for the label metrics.
+  coherence:
+    num_samples: 1024
+    batch_size: 128
+    pivot_modality: m0
+    heads:
+      m0: { metrics: [] }
+      m1: { metrics: [] }
+      m2: { metrics: [] }
+      digit:
+        metrics:
+          - target: "muni.evaluation.metrics.verifiers.VerifierAccuracyAcrossModalities"
+            params:
+              ckpt: ${paths.verifier_ckpt}
+              head: "digit"
+              modality_keys: ["m0", "m1", "m2"]
+      quadrant:
+        metrics:
+          - target: "muni.evaluation.metrics.verifiers.VerifierAccuracyAcrossModalities"
+            params:
+              ckpt: ${paths.verifier_ckpt}
+              head: "quadrant"
+              modality_keys: ["m0", "m1", "m2"]
+
+# Train/eval IDs: 000000–219999 / 220000–229999.
+# Do not flip images horizontally: asymmetric strokes encode digit identity.
+dataset:
+  flip_prob: 0.0
+  stem_range: [0, 220000]
+  subdatasets: &subdatasets
+    m0:
+      type: image
+      params:
+        cache_in_memory: true
+        img_size: 64
+        share_memory: false
+        persistent_cache: &image_cache ${paths.data_root}/poly_mnist/images_m0-m1-m2_64_u8.pt
+        cache_modality: m0
+        mmap_cache: false
+        labels_csv: ${dataset.subdatasets.digit.params.csv_path}
+    m1:
+      type: image
+      params:
+        cache_in_memory: true
+        img_size: 64
+        share_memory: false
+        persistent_cache: *image_cache
+        cache_modality: m1
+        mmap_cache: false
+        labels_csv: ${dataset.subdatasets.digit.params.csv_path}
+    m2:
+      type: image
+      params:
+        cache_in_memory: true
+        img_size: 64
+        share_memory: false
+        persistent_cache: *image_cache
+        cache_modality: m2
+        mmap_cache: false
+        labels_csv: ${dataset.subdatasets.digit.params.csv_path}
+    digit:
+      type: class
+      params:
+        csv_path: &labels_csv ${paths.data_root}/poly_mnist/labels.csv
+        column_name: digit
+        num_classes: 10
+        key_format: "{:06d}"
+    quadrant:
+      type: class
+      params:
+        csv_path: *labels_csv
+        column_name: quadrant
+        num_classes: 4
+        key_format: "{:06d}"
+
+dataset_eval:
+  flip_prob: 0.0
+  stem_range: [220000, 230000]
+  subdatasets: *subdatasets
+
+# Canonical 2-GPU run: per-GPU batch 512, effective batch 1024, lr=6e-4.
+# Changing GPU count changes the auto-scaled learning rate; check the launch log.
+train:
+  epochs: 301
+  batch_size: 512
+  ema_decay: 0.999
+  # Overlap cache access with GPU compute without extra shared-memory pressure.
+  num_workers: 1
+  blr: 1.5e-4
+
+eval:
+  eval_freq: 20

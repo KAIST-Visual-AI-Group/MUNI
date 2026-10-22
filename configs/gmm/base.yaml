@@ -1,0 +1,374 @@
+# =============================================================================
+# Gaussian-mixture toy experiment — shared defaults
+#
+# Hidden vector ``h`` has ``2^n - 1`` independent Venn regions, each drawn
+# from a K-component diagonal-Gaussian mixture. Widths depend on subset size,
+# with ``region_dim`` as fallback. A modality observes every region containing
+# it: the default private/pair/triple widths 20/10/10 give 50 input features.
+#
+# Endpoint configs inherit from this file and override only their
+# aggregator and routing differences.
+#
+# Marginal references for SlicedWassersteinMetric must be precomputed once::
+#
+#   python -m scripts.build_gmm_marginals \
+#     --n-modalities 3 --region-dim 10 --K 64 --mixture-seed 42 \
+#     --region-dim-by-size '{"1":20,"2":10,"3":10}' \
+#     --num-samples 50000 --start-key 1000000 \
+#     --out-dir output/gmm/marginals
+# =============================================================================
+
+base: ../base.yaml
+
+# ── Toy hyperparameters (referenced throughout) ─────────────────────────────
+toy:
+  n_modalities: 3
+  K: 64
+  mixture_seed: 42
+  observation_noise_std: 0.0
+  observation_noise_seed: 314159
+  region_dim: 10               # fallback (used for sizes not in region_dim_by_size)
+  region_dim_by_size:
+    1: 20
+    2: 10
+    3: 10
+  modality_dim: ${gmm_modality_dim:${toy.n_modalities},${toy.region_dim},${toy.region_dim_by_size}}
+  n_train: 1000000
+  n_eval: 5000
+  marginal_dir: ./output/gmm/marginals
+  modalities: ["A", "B", "C"]
+  gen_num_samples: 5000        # SWD on unconditional generation
+  coh_num_samples: 1024        # PairwiseSharedDimsMSE coherence samples
+  coh_batch_size: 512
+  info_num_samples: 5000
+
+# ── Latent geometry ────────────────────────────────────────────────────────
+# Five methods use 48-dimensional latent tokens. MMVAE+ instead uses a
+# 48-dimensional shared head and a 24-dimensional private head per modality;
+# its flow prior acts only on the shared head.
+model:
+  latent_seq_len: 1
+  latent_dim: 48
+  noise_scale: 1.0
+
+  modules:
+    A_encoder_net:
+      target: "muni.models.toy.mlp.ToyEncoder"
+      params:
+        feat_dim: ${toy.modality_dim}
+        latent_dim: ${x2:${model.latent_dim}}
+        hidden_dim: 384
+        depth: 5
+    B_encoder_net:
+      target: "muni.models.toy.mlp.ToyEncoder"
+      params:
+        feat_dim: ${toy.modality_dim}
+        latent_dim: ${x2:${model.latent_dim}}
+        hidden_dim: 384
+        depth: 5
+    C_encoder_net:
+      target: "muni.models.toy.mlp.ToyEncoder"
+      params:
+        feat_dim: ${toy.modality_dim}
+        latent_dim: ${x2:${model.latent_dim}}
+        hidden_dim: 384
+        depth: 5
+
+    prior_net:
+      target: "muni.models.toy.mlp.ToyFlowMLP"
+      params:
+        token_dim: ${model.latent_dim}
+        hidden_size: 256
+        depth: 4
+        num_classes: 1
+        label_drop_prob: 0.0
+        context_dim: null
+        context_memory_slots: null
+
+    A_decoder_net:
+      target: "muni.models.toy.mlp.ToyFlowMLP"
+      params:
+        token_dim: ${toy.modality_dim}
+        hidden_size: 256
+        depth: 4
+        num_classes: 1
+        label_drop_prob: 0.0
+        context_dim: ${model.latent_dim}
+        context_memory_slots: ${model.latent_seq_len}
+    B_decoder_net:
+      target: "muni.models.toy.mlp.ToyFlowMLP"
+      params:
+        token_dim: ${toy.modality_dim}
+        hidden_size: 256
+        depth: 4
+        num_classes: 1
+        label_drop_prob: 0.0
+        context_dim: ${model.latent_dim}
+        context_memory_slots: ${model.latent_seq_len}
+    C_decoder_net:
+      target: "muni.models.toy.mlp.ToyFlowMLP"
+      params:
+        token_dim: ${toy.modality_dim}
+        hidden_size: 256
+        depth: 4
+        num_classes: 1
+        label_drop_prob: 0.0
+        context_dim: ${model.latent_dim}
+        context_memory_slots: ${model.latent_seq_len}
+
+  routing:
+    modalities: ${toy.modalities}
+
+    # Endpoint configs override these
+    train_paths:
+      any_self:     { weight: 0.0 }
+      any_cross:    { weight: 0.0 }
+      almost_prior: { weight: 0.0 }
+      all_any:      { weight: 0.0 }
+      one_any:      { weight: 0.0 }
+      any_any:      { weight: 0.0 }
+
+    # Endpoint configs override aggregator block.
+    aggregator: null
+
+    encoders:
+      A:
+        weight: 1
+        adapter: "muni.modules.latent.LatentFeatureEncoderAdapter"
+        module: "A_encoder_net"
+        params: {}
+      B:
+        weight: 1
+        adapter: "muni.modules.latent.LatentFeatureEncoderAdapter"
+        module: "B_encoder_net"
+        params: {}
+      C:
+        weight: 1
+        adapter: "muni.modules.latent.LatentFeatureEncoderAdapter"
+        module: "C_encoder_net"
+        params: {}
+
+    decoders:
+      A:
+        adapter: "muni.modules.flow.FlowDecoderAdapter"
+        module: "A_decoder_net"
+        weight: 1
+        params:
+          layout: feature
+          class_label: 0
+          noise_scale: ${model.noise_scale}
+          encoder_grad_scale: 1.0
+          p_mean: -0.8
+          p_std: 0.8
+          timestep_dist: logit_normal
+          sampler_steps: 50
+      B:
+        adapter: "muni.modules.flow.FlowDecoderAdapter"
+        module: "B_decoder_net"
+        weight: 1
+        params:
+          layout: feature
+          class_label: 0
+          noise_scale: ${model.noise_scale}
+          encoder_grad_scale: 1.0
+          p_mean: -0.8
+          p_std: 0.8
+          timestep_dist: logit_normal
+          sampler_steps: 50
+      C:
+        adapter: "muni.modules.flow.FlowDecoderAdapter"
+        module: "C_decoder_net"
+        weight: 1
+        params:
+          layout: feature
+          class_label: 0
+          noise_scale: ${model.noise_scale}
+          encoder_grad_scale: 1.0
+          p_mean: -0.8
+          p_std: 0.8
+          timestep_dist: logit_normal
+          sampler_steps: 50
+
+    prior:
+      adapter: "muni.modules.flow.FlowPriorAdapter"
+      module: "prior_net"
+      weight: 1
+      params:
+        class_label: 0
+        seq_len: ${model.latent_seq_len}
+        noise_scale: ${model.noise_scale}
+        encoder_grad_scale: 0.1
+        scheduler_eps: 5.0e-2
+        sampler_eps: 5.0e-2
+        p_mean: -0.8
+        p_std: 0.8
+        sampler_steps: 50
+        timestep_dist: logit_normal
+
+# ── Evaluators ─────────────────────────────────────────────────────────────
+# Reconstruction is intentionally skipped (per project requirements).
+# Generation: per-modality SWD vs the precomputed marginal reference.
+# Translation: A→B, B→C, C→A with paired AlignmentMSE + condition-agnostic SWD.
+# Coherence: pivot=A, heads={B, C}; PairwiseSharedDimsMSE under one head sees
+# all 3 modalities through the ``sources`` dict.
+evaluators:
+  generation:
+    A:
+      metrics:
+        - target: "muni.evaluation.metrics.gmm.SlicedWassersteinMetric"
+          params:
+            reference_file: ${toy.marginal_dir}/marginal_A.npz
+            num_projections: 128
+            num_samples: ${toy.gen_num_samples}
+            batch_size: 512
+            seed: 0
+    B:
+      metrics:
+        - target: "muni.evaluation.metrics.gmm.SlicedWassersteinMetric"
+          params:
+            reference_file: ${toy.marginal_dir}/marginal_B.npz
+            num_projections: 128
+            num_samples: ${toy.gen_num_samples}
+            batch_size: 512
+            seed: 1
+    C:
+      metrics:
+        - target: "muni.evaluation.metrics.gmm.SlicedWassersteinMetric"
+          params:
+            reference_file: ${toy.marginal_dir}/marginal_C.npz
+            num_projections: 128
+            num_samples: ${toy.gen_num_samples}
+            batch_size: 512
+            seed: 2
+
+  translation:
+    - src: "A"
+      tgt: "B"
+      metrics:
+        - target: "muni.evaluation.metrics.gmm.AlignmentMSE"
+          params:
+            shared_dims_only: true
+            n_modalities: ${toy.n_modalities}
+            region_dim: ${toy.region_dim}
+            region_dim_by_size: ${toy.region_dim_by_size}
+            modality_names: ${toy.modalities}
+    - src: "B"
+      tgt: "C"
+      metrics:
+        - target: "muni.evaluation.metrics.gmm.AlignmentMSE"
+          params:
+            shared_dims_only: true
+            n_modalities: ${toy.n_modalities}
+            region_dim: ${toy.region_dim}
+            region_dim_by_size: ${toy.region_dim_by_size}
+            modality_names: ${toy.modalities}
+    - src: "C"
+      tgt: "A"
+      metrics:
+        - target: "muni.evaluation.metrics.gmm.AlignmentMSE"
+          params:
+            shared_dims_only: true
+            n_modalities: ${toy.n_modalities}
+            region_dim: ${toy.region_dim}
+            region_dim_by_size: ${toy.region_dim_by_size}
+            modality_names: ${toy.modalities}
+
+  coherence:
+    pivot_modality: A
+    num_samples: ${toy.coh_num_samples}
+    batch_size: ${toy.coh_batch_size}
+    heads:
+      B:
+        metrics:
+          - target: "muni.evaluation.metrics.gmm.PairwiseSharedDimsMSE"
+            params:
+              n_modalities: ${toy.n_modalities}
+              region_dim: ${toy.region_dim}
+              region_dim_by_size: ${toy.region_dim_by_size}
+              modality_names: ${toy.modalities}
+      C:
+        metrics: []
+
+  information:
+    A:
+      target: "muni.evaluation.information.PriorDenoisingCostEvaluator"
+      params: { num_samples: "${toy.info_num_samples}", num_u_steps: 8 }
+    B:
+      target: "muni.evaluation.information.PriorDenoisingCostEvaluator"
+      params: { num_samples: "${toy.info_num_samples}", num_u_steps: 8 }
+    C:
+      target: "muni.evaluation.information.PriorDenoisingCostEvaluator"
+      params: { num_samples: "${toy.info_num_samples}", num_u_steps: 8 }
+
+# ── Dataset (train / eval split via stem_range) ─────────────────────────────
+# All modalities share one pool identified by mixture_seed, n_samples, and
+# region geometry, so a key selects the same hidden row within that pool.
+# stem_range splits its keys into disjoint train/eval ranges. Changing the
+# total pool size changes row draws, but not the marginal mixture law.
+_subdatasets: &subdatasets
+  A:
+    type: gaussian_mixture
+    params:
+      n_modalities: ${toy.n_modalities}
+      region_dim: ${toy.region_dim}
+      region_dim_by_size: ${toy.region_dim_by_size}
+      K: ${toy.K}
+      n_samples: ${add:${toy.n_train},${toy.n_eval}}
+      modality_idx: 0
+      mixture_seed: ${toy.mixture_seed}
+      observation_noise_std: ${toy.observation_noise_std}
+      observation_noise_seed: ${toy.observation_noise_seed}
+  B:
+    type: gaussian_mixture
+    params:
+      n_modalities: ${toy.n_modalities}
+      region_dim: ${toy.region_dim}
+      region_dim_by_size: ${toy.region_dim_by_size}
+      K: ${toy.K}
+      n_samples: ${add:${toy.n_train},${toy.n_eval}}
+      modality_idx: 1
+      mixture_seed: ${toy.mixture_seed}
+      observation_noise_std: ${toy.observation_noise_std}
+      observation_noise_seed: ${toy.observation_noise_seed}
+  C:
+    type: gaussian_mixture
+    params:
+      n_modalities: ${toy.n_modalities}
+      region_dim: ${toy.region_dim}
+      region_dim_by_size: ${toy.region_dim_by_size}
+      K: ${toy.K}
+      n_samples: ${add:${toy.n_train},${toy.n_eval}}
+      modality_idx: 2
+      mixture_seed: ${toy.mixture_seed}
+      observation_noise_std: ${toy.observation_noise_std}
+      observation_noise_seed: ${toy.observation_noise_seed}
+
+dataset:
+  flip_prob: 0.0
+  stem_range: [0, "${toy.n_train}"]
+  subdatasets: *subdatasets
+
+dataset_eval:
+  flip_prob: 0.0
+  stem_range: ["${toy.n_train}", "${add:${toy.n_train},${toy.n_eval}}"]
+  subdatasets: *subdatasets
+
+# ── Training ───────────────────────────────────────────────────────────────
+train:
+  epochs: 201
+  batch_size: 4000
+  # Picked so train.py's eff_lr lands exactly at 4e-3
+  blr: 2.56e-4
+  warmup_epochs: 5
+  ema_decay: 0.999
+  num_workers: 1
+  pin_mem: true
+  compile_backbones: true   # 18-22M MLP backbones; compile pays off across 201 epochs
+
+checkpoint:
+  output_dir: ./output/gmm/_unset
+  log_freq: 50
+  save_ckpt_freq: 50
+
+eval:
+  eval_freq: 25

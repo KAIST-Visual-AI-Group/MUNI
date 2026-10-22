@@ -1,0 +1,30 @@
+# =============================================================================
+# PolyMNIST × 5 modalities — MUNI (Ours).
+# =============================================================================
+
+base: base.yaml
+
+model:
+  routing:
+    aggregator:
+      adapter: "muni.modules.aggregation.PoEAggregator"
+      params:
+        modalities: ${model.routing.modalities}
+        latent_dim: ${model.latent_dim}
+        prior_expert: false
+
+    stop_grad_pairs:
+      - ["m0", "m0"]
+      - ["m1", "m1"]
+      - ["m2", "m2"]
+
+    train_paths:
+      any_decoder:  { weight: 5.0 }
+      almost_prior: { weight: 1.0 }
+
+    prior:
+      params:
+        encoder_grad_scale: 0.1
+
+checkpoint:
+  output_dir: ./output/poly_mnist/muni

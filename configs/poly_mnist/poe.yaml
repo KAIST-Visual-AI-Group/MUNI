@@ -1,0 +1,25 @@
+# =============================================================================
+# PolyMNIST × 5 modalities — MVAE (PoE) baseline.
+# =============================================================================
+
+base: base.yaml
+
+model:
+  routing:
+    aggregator:
+      adapter: "muni.modules.aggregation.PoEAggregator"
+      params:
+        modalities: ${model.routing.modalities}
+        latent_dim: ${model.latent_dim}
+        prior_expert: false
+
+    train_paths:
+      any_self:     { weight: 5.0 }
+      any_prior:    { weight: 1.0 }
+
+    prior:
+      params:
+        encoder_grad_scale: 0.1
+
+checkpoint:
+  output_dir: ./output/poly_mnist/poe

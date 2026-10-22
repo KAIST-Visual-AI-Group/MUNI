@@ -1,0 +1,57 @@
+# =============================================================================
+# Benchmark evaluation configuration for image-text-audio generation
+# =============================================================================
+#
+# All paths resolve against the self-contained image_text_audio/ layout.
+# Build from supplied prepared metadata and PNG/JPG/WAV inputs with:
+#   bash scripts/build_image_text_audio_cache.sh
+#
+# Feature parquet format:
+#   feats.parquet columns: (stem, text, image, audio) where each modality is
+#     standardized 768-d float32 bytes (EmbeddingGemma / CLIP / bridged CLAP),
+#     using supplied fixed normalization statistics. Missing modalities are NULL.
+#   images.parquet / audio.parquet: (stem, bytes, ext) raw file bytes.
+#   muni/evaluation/data.py reads these compact files directly.
+# =============================================================================
+
+paths:
+  data_root: ${required_env:DATA_ROOT}
+
+cache_root: ${paths.data_root}/image_text_audio
+
+datasets:
+
+  # ── T↔I: MS-COCO validation set ─────────────────────────────────────────
+  text-image:
+    feat_dir:      ${cache_root}/eval/coco_val2014/feats.parquet
+    captions_json: ${cache_root}/eval/coco_val2014/captions.json
+    cider_references_json: ${cache_root}/eval/coco_val2014/captions.json
+    images_dir:    ${cache_root}/eval/coco_val2014/images.parquet
+    fid_stats:     ${cache_root}/eval/coco_val2014/fid_stats.npz
+
+  # ── T↔A: AudioCaps test set ─────────────────────────────────────────────
+  text-audio:
+    feat_dir:      ${cache_root}/eval/audiocaps_test/feats.parquet
+    captions_json: ${cache_root}/eval/audiocaps_test/captions.json
+    cider_references_json: ${cache_root}/eval/audiocaps_test/captions.json
+    audio_dir:     ${cache_root}/eval/audiocaps_test/audio.parquet
+    fad_stats:     ${cache_root}/eval/audiocaps_test/fad_stats_16k.npz
+
+  # ── I↔A: VGGSound test set ──────────────────────────────────────────────
+  image-audio:
+    feat_dir:    ${cache_root}/eval/vggsound_test/feats.parquet
+    images_dir:  ${cache_root}/eval/vggsound_test/images.parquet
+    audio_dir:   ${cache_root}/eval/vggsound_test/audio.parquet
+    fid_stats:   ${cache_root}/eval/vggsound_test/fid_stats.npz
+    fad_stats:   ${cache_root}/eval/vggsound_test/fad_stats_16k.npz
+
+  # ── Triplet 3-modality set ───────────────────────────────────────────────
+  # Supplied aligned AudioCaps text/image/audio rows share the same cache.
+  # MANY_TO_ONE_TASKS use dataset_key="triplet" to select all three modalities.
+  triplet:
+    feat_dir:      ${cache_root}/eval/audiocaps_test/feats.parquet
+    captions_json: ${cache_root}/eval/audiocaps_test/captions.json
+    images_dir:    ${cache_root}/eval/audiocaps_test/images.parquet
+    audio_dir:     ${cache_root}/eval/audiocaps_test/audio.parquet
+    fad_stats:     ${cache_root}/eval/audiocaps_test/fad_stats_16k.npz
+

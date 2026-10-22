@@ -1,0 +1,45 @@
+# Prepared inputs contain metadata, PNG/JPG images, and WAV audio.
+# Edit individual paths when your supplied data uses another layout.
+input_root: ${oc.env:DATA_ROOT,data}/image_text_audio_raw
+asset_root: ${oc.env:CKPT_ROOT,ckpts}
+output_root: ${oc.env:DATA_ROOT,data}/image_text_audio
+reference_root: ${oc.env:DATA_ROOT,data}/image_text_audio_references
+assets:
+  text_model: ${asset_root}/flowbind/embeddinggemma-300m
+  clip_checkpoint: ${asset_root}/clip/ViT-L-14.pt
+  clap_checkpoint: ${asset_root}/flowbind/clap.pt
+  audio_bridge: ${asset_root}/flowbind/lightweight_audio_ae.pth
+  stats_root: assets/image_text_audio/stats
+
+datasets:
+  laion_coco_aesthetic:
+    metadata: ${input_root}/laion_coco_aesthetic/metadata.csv
+    images_dir: ${input_root}/laion_coco_aesthetic/images
+  flickr30k:
+    metadata: ${input_root}/flickr30k/annotations.csv
+    images_dir: ${input_root}/flickr30k/images
+  audiocaps:
+    metadata: ${input_root}/audiocaps/metadata/train.csv
+    audio_dir: ${input_root}/audiocaps/audio
+  vggsound:
+    metadata: ${input_root}/vggsound/metadata.csv
+    split: train
+    images_dir: ${input_root}/vggsound/images
+    audio_dir: ${input_root}/vggsound/audio
+  coco_val2014:
+    captions: ${input_root}/coco_val2014/captions.json
+    images_dir: ${input_root}/coco_val2014/images
+    reference_stats:
+      fid_stats.npz: ${reference_root}/coco_val2014/fid_stats.npz
+  audiocaps_test:
+    captions: ${input_root}/audiocaps_test/captions.json
+    images_dir: ${input_root}/audiocaps_test/images
+    audio_dir: ${input_root}/audiocaps_test/audio
+    reference_stats:
+      fad_stats_16k.npz: assets/image_text_audio/reference_stats/audiocaps_fad.npz
+  vggsound_test:
+    images_dir: ${input_root}/vggsound_test/images
+    audio_dir: ${input_root}/vggsound_test/audio
+    reference_stats:
+      fid_stats.npz: ${reference_root}/vggsound_test/fid_stats.npz
+      fad_stats_16k.npz: assets/image_text_audio/reference_stats/vggsound_fad.npz

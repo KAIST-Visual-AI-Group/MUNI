@@ -1,0 +1,25 @@
+# =============================================================================
+# Gaussian-mixture benchmark — MoPoE baseline
+# PoEAggregator (prior_expert=False) + ``any_any`` routing — each step
+# encodes an arbitrary non-empty subset (bitmask-uniform) and reconstructs
+# a uniformly chosen target in {prior} ∪ available.  The mixture-over-
+# subsets that defines MoPoE in Sutter et al. 2021 emerges from the routing
+# distribution, not from a dedicated aggregator.
+# =============================================================================
+
+base: base.yaml
+
+model:
+  routing:
+    train_paths:
+      any_any:      { weight: 1.0 }
+
+    aggregator:
+      adapter: "muni.modules.aggregation.PoEAggregator"
+      params:
+        modalities: ${model.routing.modalities}
+        latent_dim: ${model.latent_dim}
+        prior_expert: false
+
+checkpoint:
+  output_dir: ./output/gmm/mopoe

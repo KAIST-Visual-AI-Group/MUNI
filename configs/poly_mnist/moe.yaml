@@ -1,0 +1,23 @@
+# =============================================================================
+# PolyMNIST × 5 modalities — MMVAE (MoE) baseline.
+# =============================================================================
+
+base: base.yaml
+
+model:
+  routing:
+    aggregator:
+      adapter: "muni.modules.aggregation.MoEAggregator"
+      params:
+        modalities: ${model.routing.modalities}
+        latent_dim: ${model.latent_dim}
+
+    train_paths:
+      one_any:      { weight: 1.0 }
+
+    prior:
+      params:
+        encoder_grad_scale: 0.1
+
+checkpoint:
+  output_dir: ./output/poly_mnist/moe

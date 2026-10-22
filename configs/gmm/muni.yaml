@@ -1,0 +1,30 @@
+# =============================================================================
+# Gaussian-mixture benchmark — MUNI (Ours).
+#
+# PoE fusion with no prior expert. Routing uses ``any_decoder`` (decoder-only
+# subset reconstruction) and ``almost_prior`` (encoder + prior on near-full
+# subsets) at a 3:1 weight ratio. Self-pair encoder gradients are stopped.
+# =============================================================================
+
+base: base.yaml
+
+model:
+  routing:
+    train_paths:
+      any_decoder:  { weight: 3.0 }
+      almost_prior: { weight: 1.0 }
+
+    stop_grad_pairs:
+      - [A, A]
+      - [B, B]
+      - [C, C]
+
+    aggregator:
+      adapter: "muni.modules.aggregation.PoEAggregator"
+      params:
+        modalities: ${model.routing.modalities}
+        latent_dim: ${model.latent_dim}
+        prior_expert: false
+
+checkpoint:
+  output_dir: ./output/gmm/muni
