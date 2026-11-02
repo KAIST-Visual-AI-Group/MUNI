@@ -1,0 +1,14 @@
+# Reference statistics from prepared evaluation media.
+input_root: ${required_env:DATA_ROOT}/image_text_audio/eval
+output_root: ${required_env:DATA_ROOT}/image_text_audio/stats
+datasets:
+  coco_val2014:
+    samples: 30000
+    images: ${input_root}/coco_val2014/images.parquet
+  audiocaps_test:
+    samples: 975
+    audio: ${input_root}/audiocaps_test/audio.parquet
+  vggsound_test:
+    samples: 15446
+    images: ${input_root}/vggsound_test/images.parquet
+    audio: ${input_root}/vggsound_test/audio.parquet

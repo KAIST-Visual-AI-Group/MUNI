@@ -1,0 +1,20 @@
+# Image-text-audio MUNI-PoE with Stable Cascade large/large image decoding.
+# The learned MUNI topology and all training settings are inherited unchanged.
+
+base: muni_poe.yaml
+
+image_text_audio:
+  image_decoder: stable-cascade-large
+  image_renderer:
+    image_size: 1024
+    prior_steps: 20
+    decoder_steps: 10
+    prior_guidance_scale: 4.0
+    decoder_guidance_scale: 0.0
+    prior_shift: 2.0
+    decoder_shift: 1.0
+    seed: null
+  checkpoints:
+    image:
+      cascade_prior_dir: ${paths.ckpt_root}/stable-cascade-prior
+      cascade_decoder_dir: ${paths.ckpt_root}/stable-cascade

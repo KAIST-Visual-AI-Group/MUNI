@@ -1,0 +1,47 @@
+# MUNI shared defaults
+
+# Training
+train:
+  epochs: null
+  global_batch_size: null
+  micro_batch_size: null
+  lr: null
+  blr: null
+  warmup_epochs: 5
+  weight_decay: 0.0
+  grad_clip: 1.0
+  ema_decay: 0.9995
+  seed: 0
+  start_epoch: 0
+  num_workers: 1
+  pin_mem: true
+  compile_backbones: true
+
+# Checkpointing and logging
+checkpoint:
+  output_dir: ./output/default
+  save_last_freq: 50
+  log_freq: 50
+  save_ckpt_freq: 100
+
+# Evaluation
+eval:
+  eval_freq: 50
+  seed: 42
+  # Per-device reconstruction/translation batch size (null follows training).
+  batch_size: null
+
+# prior_kwargs are passed to prior sampling. decoder_kwargs.default applies to
+# every decoder; per-modality mappings override those defaults.
+inference:
+  prior_kwargs: {}
+  decoder_kwargs:
+    default: {}
+
+# Distributed
+distributed:
+  device: cuda
+  world_size: 1
+  local_rank: -1
+  dist_on_itp: false
+  dist_url: "env://"

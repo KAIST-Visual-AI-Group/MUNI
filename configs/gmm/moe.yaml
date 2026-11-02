@@ -1,0 +1,20 @@
+# Gaussian-mixture benchmark: MMVAE (MoE) baseline
+# MoEAggregator with ``one_any`` routing: each step encodes a single random
+# modality and reconstructs a uniformly chosen target in {prior} ∪ available.
+# With one encoded modality, the aggregator passes through its posterior.
+
+base: base.yaml
+
+model:
+  routing:
+    train_paths:
+      one_any:      { weight: 1.0 }
+
+    aggregator:
+      adapter: "muni.modules.aggregation.MoEAggregator"
+      params:
+        modalities: ${model.routing.modalities}
+        latent_dim: ${model.latent_dim}
+
+checkpoint:
+  output_dir: ./output/gmm/moe

@@ -1,0 +1,49 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+.ipynb_checkpoints/
+
+# Local development checks
+/tests/
+
+# Local environments and secrets
+.venv/
+venv/
+.conda/
+.env
+.env.*
+!.env.example
+
+# Local editor configuration
+.vscode/
+.idea/
+*.swp
+*.swo
+pyrightconfig.json
+ruff.toml
+.ruff.toml
+
+# Data, checkpoints, and experiment outputs
+/data/
+/ckpts/
+/output/
+/logs/
+**/checkpoints/
+fid_stats/*.npz
+wandb/
+events.out.tfevents.*
+slurm-*.out
+*.log
+
+# Operating-system files
+.DS_Store
+Thumbs.db

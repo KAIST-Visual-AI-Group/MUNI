@@ -1,0 +1,20 @@
+# Gaussian-mixture benchmark: MVAE (PoE) baseline
+# PoE without a prior expert, using subset reconstruction and prior targets.
+
+base: base.yaml
+
+model:
+  routing:
+    train_paths:
+      any_self:  { weight: 3.0 }
+      any_prior: { weight: 1.0 }
+
+    aggregator:
+      adapter: "muni.modules.aggregation.PoEAggregator"
+      params:
+        modalities: ${model.routing.modalities}
+        latent_dim: ${model.latent_dim}
+        prior_expert: false
+
+checkpoint:
+  output_dir: ./output/gmm/poe
